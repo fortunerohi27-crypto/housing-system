@@ -6,7 +6,7 @@ import { Plus, Wrench, Mail, Phone, Pencil, Trash2 } from "lucide-react";
 
 const TRADES = ["Plumbing", "Electrical", "HVAC", "Carpentry", "Painting", "Cleaning", "Landscaping", "Pest control", "Security", "General", "Other"];
 
-function VendorForm({ initial, onSubmit, onCancel }) {
+function VendorForm({ initial, onSubmit, onCancel, isSaving }) {
   const [form, setForm] = useState(initial || { name: "", trade: "General", phone: "", email: "", notes: "" });
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   return (
@@ -18,33 +18,52 @@ function VendorForm({ initial, onSubmit, onCancel }) {
       </div>
       <div><label className="label">Email</label><input className="input" type="email" value={form.email} onChange={set("email")} /></div>
       <div><label className="label">Notes</label><textarea className="input min-h-[80px]" value={form.notes} onChange={set("notes")} /></div>
-      <div className="flex justify-end gap-2 pt-4"><button type="button" onClick={onCancel} className="btn-ghost">Cancel</button><button type="submit" className="btn-primary">{initial?.id ? "Save changes" : "Add vendor"}</button></div>
+      <div className="flex justify-end gap-2 pt-4"><button type="button" onClick={onCancel} className="btn-ghost">Cancel</button><button type="submit" className="btn-primary" disabled={isSaving}>{isSaving ? "Saving..." : initial?.id ? "Save changes" : "Add vendor"}</button></div>
     </form>
   );
 }
 
 export default function Vendors() {
-  const { state, dispatchAudit, nextId } = useStore();
+  const { state, dispatchAudit, nextId, actions } = useStore();
   const [q, setQ] = useState("");
   const [trade, setTrade] = useState("All");
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const rows = useMemo(() => state.vendors
     .filter(v => (!q || v.name.toLowerCase().includes(q.toLowerCase()) || (v.email || "").toLowerCase().includes(q.toLowerCase())) && (trade === "All" || v.trade === trade))
     .sort((a, b) => a.name.localeCompare(b.name)),
   [state.vendors, q, trade]);
 
-  function save(payload) {
-    if (edit?.id) dispatchAudit({ type: "UPDATE_VENDOR", payload: { ...edit, ...payload } }, { entityType: "vendor", detail: edit.name });
-    else dispatchAudit({ type: "ADD_VENDOR", payload: { id: nextId("VND", state.vendors), ...payload } }, { entityType: "vendor", detail: payload.name });
-    setOpen(false); setEdit(null);
+  async function save(payload) {
+    setIsSaving(true);
+    try {
+      if (edit?.id) {
+        await actions.updateVendor({ ...edit, ...payload });
+        dispatchAudit({ type: "UPDATE_VENDOR", payload: { ...edit, ...payload } }, { entityType: "vendor", detail: edit.name });
+      } else {
+        const newVendor = { id: nextId("VND", state.vendors), ...payload };
+        await actions.addVendor(newVendor);
+        dispatchAudit({ type: "ADD_VENDOR", payload: newVendor }, { entityType: "vendor", detail: payload.name });
+      }
+      setOpen(false); setEdit(null);
+    } catch (err) {
+      alert("Error saving vendor: " + err.message);
+    } finally {
+      setIsSaving(false);
+    }
   }
 
-  function del(v) {
-    dispatchAudit({ type: "DELETE_VENDOR", payload: v.id }, { entityType: "vendor", detail: v.name });
-    setConfirm(null);
+  async function del(v) {
+    try {
+      await actions.deleteVendor(v.id);
+      dispatchAudit({ type: "DELETE_VENDOR", payload: v.id }, { entityType: "vendor", detail: v.name });
+      setConfirm(null);
+    } catch (err) {
+      alert("Error deleting vendor: " + err.message);
+    }
   }
 
   return (
@@ -113,10 +132,16 @@ export default function Vendors() {
       </main>
 
       <Modal open={open} onClose={() => { setOpen(false); setEdit(null); }} title={edit?.id ? "Edit vendor" : "Add vendor"} size="lg">
-        <VendorForm initial={edit || undefined} onSubmit={save} onCancel={() => { setOpen(false); setEdit(null); }} />
+        <VendorForm initial={edit || undefined} onSubmit={save} onCancel={() => { setOpen(false); setEdit(null); }} isSaving={isSaving} />
       </Modal>
 
-      <ConfirmDialog open={!!confirm} onCancel={() => setConfirm(null)} onConfirm={() => del(confirm)} title={`Delete "${confirm?.name}"?`} message="Tickets linked to this vendor will keep the reference but show no vendor name." />
+      <ConfirmDialog open={!!confirm} onCancel={() => setConfirm(null)} onConfirm={async () => {
+        try {
+          await del(confirm);
+        } catch (err) {
+          alert("Error deleting vendor: " + err.message);
+        }
+      }} title={`Delete "${confirm?.name}"?`} message="Tickets linked to this vendor will keep the reference but show no vendor name." />
     </>
   );
 }

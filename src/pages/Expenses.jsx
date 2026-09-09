@@ -9,7 +9,7 @@ import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
 const CATEGORIES = ["Maintenance", "Utilities", "Insurance", "Admin", "Marketing", "Taxes", "Other"];
 const COLORS = ["#44403c", "#a8a29e", "#78716c", "#d6d3d1", "#57534e", "#44403c", "#a8a29e"];
 
-function ExpenseForm({ initial, onSubmit, onCancel }) {
+function ExpenseForm({ initial, onSubmit, onCancel, isSaving }) {
   const [form, setForm] = useState(initial || { date: new Date().toISOString().slice(0,10), category: "Maintenance", description: "", amount: 0 });
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   return (
@@ -20,20 +20,21 @@ function ExpenseForm({ initial, onSubmit, onCancel }) {
       <div className="col-span-2"><label className="label">Amount</label><input className="input" type="number" min="0" value={form.amount} onChange={set("amount")} required /></div>
       <div className="col-span-2 flex justify-end gap-2 mt-4">
         <button type="button" onClick={onCancel} className="btn-ghost">Cancel</button>
-        <button type="submit" className="btn-primary">{initial?.id ? "Save changes" : "Add expense"}</button>
+        <button type="submit" className="btn-primary" disabled={isSaving}>{isSaving ? "Saving..." : initial?.id ? "Save changes" : "Add expense"}</button>
       </div>
     </form>
   );
 }
 
 export default function Expenses() {
-  const { state, dispatch, nextId } = useStore();
+  const { state, dispatch, nextId, actions } = useStore();
   const { fmt } = useApp();
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("All");
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const rows = useMemo(() => state.expenses
     .filter(e => (!q || e.description.toLowerCase().includes(q.toLowerCase())) && (cat === "All" || e.category === cat))
@@ -46,10 +47,23 @@ export default function Expenses() {
 
   const total = rows.reduce((s, e) => s + e.amount, 0);
 
-  function save(payload) {
-    if (edit?.id) dispatch({ type: "UPDATE_EXPENSE", payload: { ...edit, ...payload } });
-    else dispatch({ type: "ADD_EXPENSE", payload: { id: nextId("E", state.expenses), ...payload } });
-    setOpen(false); setEdit(null);
+  async function save(payload) {
+    setIsSaving(true);
+    try {
+      if (edit?.id) {
+        await actions.updateExpense({ ...edit, ...payload });
+        dispatch({ type: "UPDATE_EXPENSE", payload: { ...edit, ...payload } });
+      } else {
+        const newExpense = { id: nextId("E", state.expenses), ...payload };
+        await actions.addExpense(newExpense);
+        dispatch({ type: "ADD_EXPENSE", payload: newExpense });
+      }
+      setOpen(false); setEdit(null);
+    } catch (err) {
+      alert("Error saving expense: " + err.message);
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -130,10 +144,18 @@ export default function Expenses() {
       </main>
 
       <Modal open={open} onClose={() => { setOpen(false); setEdit(null); }} title={edit?.id ? "Edit expense" : "Add expense"} size="lg">
-        <ExpenseForm initial={edit || undefined} onSubmit={save} onCancel={() => { setOpen(false); setEdit(null); }} />
+        <ExpenseForm initial={edit || undefined} onSubmit={save} onCancel={() => { setOpen(false); setEdit(null); }} isSaving={isSaving} />
       </Modal>
 
-      <ConfirmDialog open={!!confirm} onCancel={() => setConfirm(null)} onConfirm={() => { dispatch({ type: "DELETE_EXPENSE", payload: confirm.id }); setConfirm(null); }} title={`Delete expense?`} message={confirm?.description} />
+      <ConfirmDialog open={!!confirm} onCancel={() => setConfirm(null)} onConfirm={async () => {
+        try {
+          await actions.deleteExpense(confirm.id);
+          dispatch({ type: "DELETE_EXPENSE", payload: confirm.id });
+          setConfirm(null);
+        } catch (err) {
+          alert("Error deleting expense: " + err.message);
+        }
+      }} title={`Delete expense?`} message={confirm?.description} />
     </>
   );
 }

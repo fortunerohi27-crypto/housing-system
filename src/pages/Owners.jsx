@@ -5,7 +5,7 @@ import { useStore } from "../context/StoreContext.jsx";
 import { useApp } from "../context/AppContext.jsx";
 import { Plus, User, Mail, Phone, Pencil, Trash2, Building2 } from "lucide-react";
 
-function OwnerForm({ initial, onSubmit, onCancel }) {
+function OwnerForm({ initial, onSubmit, onCancel, isSaving }) {
   const [form, setForm] = useState(initial || { name: "", email: "", phone: "", ownershipPct: 100, notes: "" });
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   return (
@@ -17,32 +17,51 @@ function OwnerForm({ initial, onSubmit, onCancel }) {
       </div>
       <div><label className="label">Default ownership %</label><input className="input" type="number" min="0" max="100" value={form.ownershipPct} onChange={set("ownershipPct")} /><p className="text-xs text-stone-500 mt-1">Used as the default when this owner is assigned to a new property.</p></div>
       <div><label className="label">Notes</label><textarea className="input min-h-[90px]" value={form.notes} onChange={set("notes")} /></div>
-      <div className="flex justify-end gap-2 pt-4"><button type="button" onClick={onCancel} className="btn-ghost">Cancel</button><button type="submit" className="btn-primary">{initial?.id ? "Save changes" : "Add owner"}</button></div>
+      <div className="flex justify-end gap-2 pt-4"><button type="button" onClick={onCancel} className="btn-ghost">Cancel</button><button type="submit" className="btn-primary" disabled={isSaving}>{isSaving ? "Saving..." : initial?.id ? "Save changes" : "Add owner"}</button></div>
     </form>
   );
 }
 
 export default function Owners() {
-  const { state, dispatchAudit, nextId } = useStore();
+  const { state, dispatchAudit, nextId, actions } = useStore();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const rows = useMemo(() => state.owners
     .filter(o => !q || o.name.toLowerCase().includes(q.toLowerCase()) || (o.email || "").toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => a.name.localeCompare(b.name)),
   [state.owners, q]);
 
-  function save(payload) {
-    if (edit?.id) dispatchAudit({ type: "UPDATE_OWNER", payload: { ...edit, ...payload } }, { entityType: "owner", detail: edit.name });
-    else dispatchAudit({ type: "ADD_OWNER", payload: { id: nextId("OWN", state.owners), ...payload } }, { entityType: "owner", detail: payload.name });
-    setOpen(false); setEdit(null);
+  async function save(payload) {
+    setIsSaving(true);
+    try {
+      if (edit?.id) {
+        await actions.updateOwner({ ...edit, ...payload });
+        dispatchAudit({ type: "UPDATE_OWNER", payload: { ...edit, ...payload } }, { entityType: "owner", detail: edit.name });
+      } else {
+        const newOwner = { id: nextId("OWN", state.owners), ...payload };
+        await actions.addOwner(newOwner);
+        dispatchAudit({ type: "ADD_OWNER", payload: newOwner }, { entityType: "owner", detail: payload.name });
+      }
+      setOpen(false); setEdit(null);
+    } catch (err) {
+      alert("Error saving owner: " + err.message);
+    } finally {
+      setIsSaving(false);
+    }
   }
 
-  function del(o) {
-    dispatchAudit({ type: "DELETE_OWNER", payload: o.id }, { entityType: "owner", detail: o.name });
-    setConfirm(null);
+  async function del(o) {
+    try {
+      await actions.deleteOwner(o.id);
+      dispatchAudit({ type: "DELETE_OWNER", payload: o.id }, { entityType: "owner", detail: o.name });
+      setConfirm(null);
+    } catch (err) {
+      alert("Error deleting owner: " + err.message);
+    }
   }
 
   return (
@@ -89,10 +108,16 @@ export default function Owners() {
       </main>
 
       <Modal open={open} onClose={() => { setOpen(false); setEdit(null); }} title={edit?.id ? "Edit owner" : "Add owner"} size="lg">
-        <OwnerForm initial={edit || undefined} onSubmit={save} onCancel={() => { setOpen(false); setEdit(null); }} />
+        <OwnerForm initial={edit || undefined} onSubmit={save} onCancel={() => { setOpen(false); setEdit(null); }} isSaving={isSaving} />
       </Modal>
 
-      <ConfirmDialog open={!!confirm} onCancel={() => setConfirm(null)} onConfirm={() => del(confirm)} title={`Delete "${confirm?.name}"?`} message="Properties linked to this owner will keep the assignment but show no owner name." />
+      <ConfirmDialog open={!!confirm} onCancel={() => setConfirm(null)} onConfirm={async () => {
+        try {
+          await del(confirm);
+        } catch (err) {
+          alert("Error deleting owner: " + err.message);
+        }
+      }} title={`Delete "${confirm?.name}"?`} message="Properties linked to this owner will keep the assignment but show no owner name." />
     </>
   );
 }

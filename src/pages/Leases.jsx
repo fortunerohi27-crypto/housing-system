@@ -8,7 +8,7 @@ import jsPDF from "jspdf";
 
 const STATUSES = ["Active", "Expiring", "Renewal", "Ended"];
 
-function LeaseForm({ initial, tenants, units, onSubmit, onCancel }) {
+function LeaseForm({ initial, tenants, units, onSubmit, onCancel, isSaving }) {
   const [form, setForm] = useState(initial || { tenantId: "", unitId: "", start: new Date().toISOString().slice(0,10), end: "", rent: 0, deposit: 0, status: "Active" });
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -58,7 +58,7 @@ function LeaseForm({ initial, tenants, units, onSubmit, onCancel }) {
       </div>
       <div className="col-span-2 flex justify-end gap-2 mt-4">
         <button type="button" onClick={onCancel} className="btn-ghost">Cancel</button>
-        <button type="submit" className="btn-primary">{initial?.id ? "Save changes" : "Create lease"}</button>
+        <button type="submit" className="btn-primary" disabled={isSaving}>{isSaving ? "Saving..." : initial?.id ? "Save changes" : "Create lease"}</button>
       </div>
     </form>
   );
@@ -135,13 +135,14 @@ function buildLeasePdf(lease, tenant, unit, property, brandName = "EstateHub") {
 }
 
 export default function Leases() {
-  const { state, dispatch, nextId } = useStore();
+  const { state, dispatch, nextId, actions } = useStore();
   const { fmt } = useApp();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("All");
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const tenantOpts = state.tenants;
   const unitOpts = useMemo(() => state.units.map(u => ({ ...u, propertyName: state.properties.find(p => p.id === u.propertyId)?.name || "—" })), [state.units, state.properties]);
@@ -157,10 +158,23 @@ export default function Leases() {
       .filter(l => (!q || (l.tenant?.name || "").toLowerCase().includes(q.toLowerCase()) || (l.property?.name || "").toLowerCase().includes(q.toLowerCase())) && (status === "All" || l.status === status));
   }, [state.leases, state.tenants, state.units, state.properties, q, status]);
 
-  function save(payload) {
-    if (edit?.id) dispatch({ type: "UPDATE_LEASE", payload: { ...edit, ...payload } });
-    else dispatch({ type: "ADD_LEASE", payload: { id: nextId("L", state.leases), ...payload } });
-    setOpen(false); setEdit(null);
+  async function save(payload) {
+    setIsSaving(true);
+    try {
+      if (edit?.id) {
+        await actions.updateLease({ ...edit, ...payload });
+        dispatch({ type: "UPDATE_LEASE", payload: { ...edit, ...payload } });
+      } else {
+        const newLease = { id: nextId("L", state.leases), ...payload };
+        await actions.addLease(newLease);
+        dispatch({ type: "ADD_LEASE", payload: newLease });
+      }
+      setOpen(false); setEdit(null);
+    } catch (err) {
+      alert("Error saving lease: " + err.message);
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   function exportPdf(l) {
@@ -247,10 +261,18 @@ export default function Leases() {
       </main>
 
       <Modal open={open} onClose={() => { setOpen(false); setEdit(null); }} title={edit?.id ? "Edit lease" : "New lease"} size="lg">
-        <LeaseForm initial={edit || undefined} tenants={tenantOpts} units={unitOpts} onSubmit={save} onCancel={() => { setOpen(false); setEdit(null); }} />
+        <LeaseForm initial={edit || undefined} tenants={tenantOpts} units={unitOpts} onSubmit={save} onCancel={() => { setOpen(false); setEdit(null); }} isSaving={isSaving} />
       </Modal>
 
-      <ConfirmDialog open={!!confirm} onCancel={() => setConfirm(null)} onConfirm={() => { dispatch({ type: "DELETE_LEASE", payload: confirm.id }); setConfirm(null); }} title={`Delete lease ${confirm?.id}?`} />
+      <ConfirmDialog open={!!confirm} onCancel={() => setConfirm(null)} onConfirm={async () => {
+        try {
+          await actions.deleteLease(confirm.id);
+          dispatch({ type: "DELETE_LEASE", payload: confirm.id });
+          setConfirm(null);
+        } catch (err) {
+          alert("Error deleting lease: " + err.message);
+        }
+      }} title={`Delete lease ${confirm?.id}?`} />
     </>
   );
 }

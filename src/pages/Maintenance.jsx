@@ -11,7 +11,7 @@ const COLUMNS = [
 ];
 const PRIORITIES = ["High", "Medium", "Low"];
 
-function TicketForm({ initial, tenants, units, onSubmit, onCancel }) {
+function TicketForm({ initial, tenants, units, onSubmit, onCancel, isSaving }) {
   const [form, setForm] = useState(initial || { title: "", unitId: "", tenantId: "", priority: "Medium", status: "Open" });
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -31,19 +31,20 @@ function TicketForm({ initial, tenants, units, onSubmit, onCancel }) {
       <div><label className="label">Status</label><select className="input" value={form.status} onChange={set("status")}>{COLUMNS.map(c => <option key={c.key}>{c.key}</option>)}</select></div>
       <div className="col-span-2 flex justify-end gap-2 mt-4">
         <button type="button" onClick={onCancel} className="btn-ghost">Cancel</button>
-        <button type="submit" className="btn-primary">{initial?.id ? "Save changes" : "Create ticket"}</button>
+        <button type="submit" className="btn-primary" disabled={isSaving}>{isSaving ? "Saving..." : initial?.id ? "Save changes" : "Create ticket"}</button>
       </div>
     </form>
   );
 }
 
 export default function Maintenance() {
-  const { state, dispatch, nextId } = useStore();
+  const { state, dispatch, nextId, actions } = useStore();
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState(null);
   const [confirm, setConfirm] = useState(null);
   const [dragging, setDragging] = useState(null);
   const [q, setQ] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
   const rows = useMemo(() => {
     return state.maintenance.map(m => ({
@@ -55,18 +56,36 @@ export default function Maintenance() {
 
   function onDragStart(e, id) { setDragging(id); e.dataTransfer.effectAllowed = "move"; }
   function onDragOver(e)      { e.preventDefault(); }
-  function onDrop(e, status)  {
+  async function onDrop(e, status)  {
     e.preventDefault();
     if (!dragging) return;
-    dispatch({ type: "MOVE_MAINT", payload: { id: dragging, status } });
-    setDragging(null);
+    try {
+      await actions.moveMaint({ id: dragging, status });
+      dispatch({ type: "MOVE_MAINT", payload: { id: dragging, status } });
+      setDragging(null);
+    } catch (err) {
+      alert("Error moving ticket: " + err.message);
+    }
   }
 
-  function save(payload) {
+  async function save(payload) {
+    setIsSaving(true);
     const today = new Date().toISOString().slice(0,10);
-    if (edit?.id) dispatch({ type: "UPDATE_MAINT", payload: { ...edit, ...payload, updated: today } });
-    else dispatch({ type: "ADD_MAINT", payload: { id: nextId("M", state.maintenance), ...payload, created: today, updated: today } });
-    setOpen(false); setEdit(null);
+    try {
+      if (edit?.id) {
+        await actions.updateMaint({ ...edit, ...payload, updated: today });
+        dispatch({ type: "UPDATE_MAINT", payload: { ...edit, ...payload, updated: today } });
+      } else {
+        const newTicket = { id: nextId("M", state.maintenance), ...payload, created: today, updated: today };
+        await actions.addMaint(newTicket);
+        dispatch({ type: "ADD_MAINT", payload: newTicket });
+      }
+      setOpen(false); setEdit(null);
+    } catch (err) {
+      alert("Error saving ticket: " + err.message);
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -162,10 +181,19 @@ export default function Maintenance() {
           units={state.units.map(u => ({ ...u, propertyName: state.properties.find(p => p.id === u.propertyId)?.name || "—" }))}
           onSubmit={save}
           onCancel={() => { setOpen(false); setEdit(null); }}
+          isSaving={isSaving}
         />
       </Modal>
 
-      <ConfirmDialog open={!!confirm} onCancel={() => setConfirm(null)} onConfirm={() => { dispatch({ type: "DELETE_MAINT", payload: confirm.id }); setConfirm(null); }} title="Delete ticket?" message={confirm?.title} />
+      <ConfirmDialog open={!!confirm} onCancel={() => setConfirm(null)} onConfirm={async () => {
+        try {
+          await actions.deleteMaint(confirm.id);
+          dispatch({ type: "DELETE_MAINT", payload: confirm.id });
+          setConfirm(null);
+        } catch (err) {
+          alert("Error deleting ticket: " + err.message);
+        }
+      }} title="Delete ticket?" message={confirm?.title} />
     </>
   );
 }

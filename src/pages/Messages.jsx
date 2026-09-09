@@ -4,7 +4,7 @@ import { Modal, ConfirmDialog, EmptyState, SearchBar, initials } from "./_shared
 import { useStore } from "../context/StoreContext.jsx";
 import { Plus, Send, Paperclip, Smile, Search, Pencil, Trash2 } from "lucide-react";
 
-function ComposeForm({ tenants, onSubmit, onCancel }) {
+function ComposeForm({ tenants, onSubmit, onCancel, isSaving }) {
   const [form, setForm] = useState({ from: "", subject: "", text: "" });
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   return (
@@ -17,18 +17,19 @@ function ComposeForm({ tenants, onSubmit, onCancel }) {
       </div>
       <div><label className="label">Subject</label><input className="input" placeholder="What's this about?" value={form.subject} onChange={set("subject")} required /></div>
       <div><label className="label">Message</label><textarea className="input min-h-[110px]" placeholder="Write your message..." value={form.text} onChange={set("text")} required /></div>
-      <div className="flex justify-end gap-2 pt-2"><button type="button" onClick={onCancel} className="btn-ghost">Cancel</button><button type="submit" className="btn-primary">Start conversation</button></div>
+      <div className="flex justify-end gap-2 pt-2"><button type="button" onClick={onCancel} className="btn-ghost">Cancel</button><button type="submit" className="btn-primary" disabled={isSaving}>{isSaving ? "Saving..." : "Start conversation"}</button></div>
     </form>
   );
 }
 
 export default function Messages() {
-  const { state, dispatch, nextId } = useStore();
+  const { state, dispatch, nextId, actions } = useStore();
   const [q, setQ] = useState("");
   const [activeId, setActiveId] = useState(state.messages[0]?.id || null);
   const [draft, setDraft] = useState("");
   const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const list = useMemo(() => state.messages
     .filter(m => !q || m.from.toLowerCase().includes(q.toLowerCase()) || m.subject.toLowerCase().includes(q.toLowerCase()))
@@ -37,27 +38,50 @@ export default function Messages() {
 
   const active = list.find(m => m.id === activeId);
 
-  function openThread(id) {
+  async function openThread(id) {
     setActiveId(id);
     const m = state.messages.find(x => x.id === id);
-    if (m && m.unread) dispatch({ type: "MARK_READ", payload: id });
+    if (m && m.unread) {
+      try {
+        await actions.markMessageRead(id);
+        dispatch({ type: "MARK_READ", payload: id });
+      } catch (err) {
+        console.error("Error marking read:", err);
+      }
+    }
   }
 
-  function send() {
+  async function send() {
     if (!draft.trim() || !activeId) return;
-    dispatch({ type: "SEND_REPLY", payload: { id: activeId, reply: { who: "manager", text: draft, t: "now" } } });
-    setDraft("");
+    setIsSaving(true);
+    try {
+      await actions.sendReply({ id: activeId, reply: { who: "manager", text: draft, t: "now" } });
+      dispatch({ type: "SEND_REPLY", payload: { id: activeId, reply: { who: "manager", text: draft, t: "now" } } });
+      setDraft("");
+    } catch (err) {
+      alert("Error sending message: " + err.message);
+    } finally {
+      setIsSaving(false);
+    }
   }
 
-  function startNew(payload) {
-    const id = nextId("MSG", state.messages);
-    const msg = {
-      id, from: payload.from, subject: payload.subject,
-      preview: payload.text, time: "now", unread: true,
-      thread: [{ who: "tenant", text: payload.text, t: "now" }]
-    };
-    dispatch({ type: "ADD_MESSAGE", payload: msg });
-    setOpen(false); setActiveId(id);
+  async function startNew(payload) {
+    setIsSaving(true);
+    try {
+      const id = nextId("MSG", state.messages);
+      const msg = {
+        id, from: payload.from, subject: payload.subject,
+        preview: payload.text, time: "now", unread: true,
+        thread: [{ who: "tenant", text: payload.text, t: "now" }]
+      };
+      await actions.addMessage(msg);
+      dispatch({ type: "ADD_MESSAGE", payload: msg });
+      setOpen(false); setActiveId(id);
+    } catch (err) {
+      alert("Error starting conversation: " + err.message);
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -120,7 +144,7 @@ export default function Messages() {
                       <button className="h-10 w-10 grid place-items-center rounded-xl hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-500 transition-colors"><Paperclip size={16} /></button>
                       <input className="input flex-1" placeholder="Type your reply..." value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} />
                       <button className="h-10 w-10 grid place-items-center rounded-xl hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-500 transition-colors"><Smile size={16} /></button>
-                      <button onClick={send} className="btn-primary shadow-md"><Send size={14} /> Send</button>
+                      <button onClick={send} className="btn-primary shadow-md" disabled={isSaving}>{isSaving ? "Sending..." : <><Send size={14} /> Send</>}</button>
                     </div>
                   </div>
                 </>
@@ -133,7 +157,7 @@ export default function Messages() {
       </main>
 
       <Modal open={open} onClose={() => setOpen(false)} title="New conversation">
-        <ComposeForm tenants={state.tenants} onSubmit={startNew} onCancel={() => setOpen(false)} />
+        <ComposeForm tenants={state.tenants} onSubmit={startNew} onCancel={() => setOpen(false)} isSaving={isSaving} />
       </Modal>
 
       <ConfirmDialog open={!!confirm} onCancel={() => setConfirm(null)} onConfirm={() => { dispatch({ type: "DELETE_MESSAGE", payload: confirm.id }); setConfirm(null); setActiveId(state.messages.filter(m => m.id !== confirm.id)[0]?.id || null); }} title="Delete conversation?" message={`Conversation with ${confirm?.from} will be removed.`} />

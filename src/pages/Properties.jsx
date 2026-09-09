@@ -119,7 +119,7 @@ function PropertyForm({ initial, owners, onSubmit, onCancel }) {
           <label htmlFor="archived" className="text-sm text-stone-700 dark:text-stone-300">Archive (hide from default list)</label>
         </div>
       </div>
-      <div className="flex justify-end gap-2 pt-4"><button type="button" onClick={onCancel} className="btn-ghost">Cancel</button><button type="submit" className="btn-primary">{initial?.id ? "Save changes" : "Create property"}</button></div>
+      <div className="flex justify-end gap-2 pt-4"><button type="button" onClick={onCancel} className="btn-ghost">Cancel</button><button type="submit" className="btn-primary" disabled={isSaving}>{isSaving ? "Saving..." : initial?.id ? "Save changes" : "Create property"}</button></div>
     </form>
   );
 }
@@ -186,7 +186,7 @@ function UnitForm({ initial, onSubmit, onCancel }) {
         </div>
         {form.floorPlanDataUrl && <img src={form.floorPlanDataUrl} alt="floor plan" className="mt-2 max-h-40 rounded-3xl border border-stone-200 dark:border-stone-700" />}
       </div>
-      <div className="col-span-2 flex justify-end gap-2 pt-4"><button type="button" onClick={onCancel} className="btn-ghost">Cancel</button><button type="submit" className="btn-primary">{initial?.id ? "Save unit" : "Add unit"}</button></div>
+      <div className="col-span-2 flex justify-end gap-2 pt-4"><button type="button" onClick={onCancel} className="btn-ghost">Cancel</button><button type="submit" className="btn-primary" disabled={isSavingUnit}>{isSavingUnit ? "Saving..." : initial?.id ? "Save unit" : "Add unit"}</button></div>
     </form>
   );
 }
@@ -200,7 +200,7 @@ function unitStatusClass(s) {
 }
 
 export default function Properties() {
-  const { state, dispatchAudit, nextId } = useStore();
+  const { state, dispatchAudit, nextId, actions } = useStore();
   const { fmt } = useApp();
   const [q, setQ] = useState("");
   const [type, setType] = useState("All");
@@ -208,12 +208,14 @@ export default function Properties() {
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Units manager state
   const [manageProp, setManageProp] = useState(null);
   const [unitOpen, setUnitOpen] = useState(false);
   const [unitEdit, setUnitEdit] = useState(null);
   const [unitConfirm, setUnitConfirm] = useState(null);
+  const [isSavingUnit, setIsSavingUnit] = useState(false);
 
   const list = useMemo(() => {
     return state.properties.filter(p => {
@@ -224,34 +226,67 @@ export default function Properties() {
     });
   }, [state.properties, q, type, showArchived]);
 
-  function save(payload) {
-    if (edit?.id) dispatchAudit({ type: "UPDATE_PROPERTY", payload: { ...edit, ...payload } }, { entityType: "property", detail: edit.name });
-    else dispatchAudit({ type: "ADD_PROPERTY", payload: { id: nextId("P", state.properties), ...payload } }, { entityType: "property", detail: payload.name });
-    setOpen(false); setEdit(null);
-  }
-
-  function saveUnit(payload) {
-    if (unitEdit?.id) dispatchAudit({ type: "UPDATE_UNIT", payload: { ...unitEdit, ...payload } }, { entityType: "unit", detail: unitEdit.label });
-    else dispatchAudit({
-      type: "ADD_UNIT",
-      payload: {
-        id: nextId("U", state.units),
-        propertyId: manageProp.id,
-        ...payload
+  async function save(payload) {
+    setIsSaving(true);
+    try {
+      if (edit?.id) {
+        await actions.updateProperty({ ...edit, ...payload });
+        dispatchAudit({ type: "UPDATE_PROPERTY", payload: { ...edit, ...payload } }, { entityType: "property", detail: edit.name });
+      } else {
+        const newProp = { id: nextId("P", state.properties), ...payload };
+        await actions.addProperty(newProp);
+        dispatchAudit({ type: "ADD_PROPERTY", payload: newProp }, { entityType: "property", detail: payload.name });
       }
-    }, { entityType: "unit", detail: payload.label });
-    setUnitOpen(false);
-    setUnitEdit(null);
+      setOpen(false); setEdit(null);
+    } catch (err) {
+      alert("Error saving property: " + err.message);
+    } finally {
+      setIsSaving(false);
+    }
   }
 
-  function deleteUnit(u) {
-    const tenant = state.tenants.find(t => t.unitId === u.id);
-    if (tenant) dispatchAudit({ type: "UPDATE_TENANT", payload: { ...tenant, unitId: "", status: "Past" } }, { entityType: "tenant", detail: tenant.name, log: false });
-    state.leases.filter(l => l.unitId === u.id).forEach(l => {
-      dispatchAudit({ type: "DELETE_LEASE", payload: l.id }, { entityType: "lease", detail: l.id, log: false });
-    });
-    dispatchAudit({ type: "DELETE_UNIT", payload: u.id }, { entityType: "unit", detail: u.label });
-    setUnitConfirm(null);
+  async function saveUnit(payload) {
+    setIsSavingUnit(true);
+    try {
+      if (unitEdit?.id) {
+        await actions.updateUnit({ ...unitEdit, ...payload });
+        dispatchAudit({ type: "UPDATE_UNIT", payload: { ...unitEdit, ...payload } }, { entityType: "unit", detail: unitEdit.label });
+      } else {
+        const newUnit = {
+          id: nextId("U", state.units),
+          propertyId: manageProp.id,
+          ...payload
+        };
+        await actions.addUnit(newUnit);
+        dispatchAudit({ type: "ADD_UNIT", payload: newUnit }, { entityType: "unit", detail: payload.label });
+      }
+      setUnitOpen(false);
+      setUnitEdit(null);
+    } catch (err) {
+      alert("Error saving unit: " + err.message);
+    } finally {
+      setIsSavingUnit(false);
+    }
+  }
+
+  async function deleteUnit(u) {
+    try {
+      const tenant = state.tenants.find(t => t.unitId === u.id);
+      if (tenant) {
+        await actions.updateTenant({ ...tenant, unitId: "", status: "Past" });
+        dispatchAudit({ type: "UPDATE_TENANT", payload: { ...tenant, unitId: "", status: "Past" } }, { entityType: "tenant", detail: tenant.name, log: false });
+      }
+      const leasesToDelete = state.leases.filter(l => l.unitId === u.id);
+      for (const l of leasesToDelete) {
+        await actions.deleteLease(l.id);
+        dispatchAudit({ type: "DELETE_LEASE", payload: l.id }, { entityType: "lease", detail: l.id, log: false });
+      }
+      await actions.deleteUnit(u.id);
+      dispatchAudit({ type: "DELETE_UNIT", payload: u.id }, { entityType: "unit", detail: u.label });
+      setUnitConfirm(null);
+    } catch (err) {
+      alert("Error deleting unit: " + err.message);
+    }
   }
 
   const managedUnits = manageProp
@@ -365,7 +400,15 @@ export default function Properties() {
       <ConfirmDialog
         open={!!confirm}
         onCancel={() => setConfirm(null)}
-        onConfirm={() => { dispatchAudit({ type: "DELETE_PROPERTY", payload: confirm.id }, { entityType: "property", detail: confirm.name }); setConfirm(null); }}
+        onConfirm={async () => {
+          try {
+            await actions.deleteProperty(confirm.id);
+            dispatchAudit({ type: "DELETE_PROPERTY", payload: confirm.id }, { entityType: "property", detail: confirm.name });
+            setConfirm(null);
+          } catch (err) {
+            alert("Error deleting property: " + err.message);
+          }
+        }}
         title={`Delete "${confirm?.name}"?`}
         message="All units and related data under this property will also be removed."
       />

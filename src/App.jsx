@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext.jsx";
+import { useStore } from "./context/StoreContext.jsx";
 import Sidebar from "./components/Sidebar.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Properties from "./pages/Properties.jsx";
@@ -16,6 +17,18 @@ import Register from "./pages/Register.jsx";
 import TenantRegister from "./pages/TenantRegister.jsx";
 import TenantPortal from "./pages/TenantPortal.jsx";
 import TenantSidebar from "./components/TenantSidebar.jsx";
+
+function RequireData({ children }) {
+  const { isLoading } = useStore();
+  if (isLoading) {
+    return (
+      <div className="min-h-screen grid place-items-center bg-slate-50 dark:bg-slate-950">
+        <div className="text-sm text-slate-500 animate-pulse">Loading database…</div>
+      </div>
+    );
+  }
+  return children;
+}
 
 function ProtectedLayout({ children }) {
   return (
@@ -79,22 +92,22 @@ export default function App() {
       <Route path="/register" element={<GuestOnly><Register /></GuestOnly>} />
       <Route path="/tenant/register" element={<GuestOnly><TenantRegister /></GuestOnly>} />
 
-      <Route path="/" element={<RequireAdmin><ProtectedLayout><Dashboard /></ProtectedLayout></RequireAdmin>} />
-      <Route path="/properties" element={<RequireAdmin><ProtectedLayout><Properties /></ProtectedLayout></RequireAdmin>} />
-      <Route path="/tenants" element={<RequireAdmin><ProtectedLayout><Tenants /></ProtectedLayout></RequireAdmin>} />
-      <Route path="/leases" element={<RequireAdmin><ProtectedLayout><Leases /></ProtectedLayout></RequireAdmin>} />
-      <Route path="/rent" element={<RequireAdmin><ProtectedLayout><Rent /></ProtectedLayout></RequireAdmin>} />
-      <Route path="/expenses" element={<RequireAdmin><ProtectedLayout><Expenses /></ProtectedLayout></RequireAdmin>} />
-      <Route path="/maintenance" element={<RequireAdmin><ProtectedLayout><Maintenance /></ProtectedLayout></RequireAdmin>} />
-      <Route path="/messages" element={<RequireAdmin><ProtectedLayout><Messages /></ProtectedLayout></RequireAdmin>} />
-      <Route path="/owners" element={<RequireAdmin><ProtectedLayout><Owners /></ProtectedLayout></RequireAdmin>} />
-      <Route path="/vendors" element={<RequireAdmin><ProtectedLayout><Vendors /></ProtectedLayout></RequireAdmin>} />
+      <Route path="/" element={<RequireAdmin><RequireData><ProtectedLayout><Dashboard /></ProtectedLayout></RequireData></RequireAdmin>} />
+      <Route path="/properties" element={<RequireAdmin><RequireData><ProtectedLayout><Properties /></ProtectedLayout></RequireData></RequireAdmin>} />
+      <Route path="/tenants" element={<RequireAdmin><RequireData><ProtectedLayout><Tenants /></ProtectedLayout></RequireData></RequireAdmin>} />
+      <Route path="/leases" element={<RequireAdmin><RequireData><ProtectedLayout><Leases /></ProtectedLayout></RequireData></RequireAdmin>} />
+      <Route path="/rent" element={<RequireAdmin><RequireData><ProtectedLayout><Rent /></ProtectedLayout></RequireData></RequireAdmin>} />
+      <Route path="/expenses" element={<RequireAdmin><RequireData><ProtectedLayout><Expenses /></ProtectedLayout></RequireData></RequireAdmin>} />
+      <Route path="/maintenance" element={<RequireAdmin><RequireData><ProtectedLayout><Maintenance /></ProtectedLayout></RequireData></RequireAdmin>} />
+      <Route path="/messages" element={<RequireAdmin><RequireData><ProtectedLayout><Messages /></ProtectedLayout></RequireData></RequireAdmin>} />
+      <Route path="/owners" element={<RequireAdmin><RequireData><ProtectedLayout><Owners /></ProtectedLayout></RequireData></RequireAdmin>} />
+      <Route path="/vendors" element={<RequireAdmin><RequireData><ProtectedLayout><Vendors /></ProtectedLayout></RequireData></RequireAdmin>} />
 
-      <Route path="/tenant" element={<RequireTenant><TenantLayout><TenantPortal /></TenantLayout></RequireTenant>} />
-      <Route path="/tenant/payments" element={<RequireTenant><TenantLayout><TenantPortal /></TenantLayout></RequireTenant>} />
-      <Route path="/tenant/maintenance" element={<RequireTenant><TenantLayout><TenantPortal /></TenantLayout></RequireTenant>} />
-      <Route path="/tenant/messages" element={<RequireTenant><TenantLayout><TenantPortal /></TenantLayout></RequireTenant>} />
-      <Route path="/tenant/lease" element={<RequireTenant><TenantLayout><TenantPortal /></TenantLayout></RequireTenant>} />
+      <Route path="/tenant" element={<RequireTenant><RequireData><TenantLayout><TenantPortal /></TenantLayout></RequireData></RequireTenant>} />
+      <Route path="/tenant/payments" element={<RequireTenant><RequireData><TenantLayout><TenantPortal /></TenantLayout></RequireData></RequireTenant>} />
+      <Route path="/tenant/maintenance" element={<RequireTenant><RequireData><TenantLayout><TenantPortal /></TenantLayout></RequireData></RequireTenant>} />
+      <Route path="/tenant/messages" element={<RequireTenant><RequireData><TenantLayout><TenantPortal /></TenantLayout></RequireData></RequireTenant>} />
+      <Route path="/tenant/lease" element={<RequireTenant><RequireData><TenantLayout><TenantPortal /></TenantLayout></RequireData></RequireTenant>} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

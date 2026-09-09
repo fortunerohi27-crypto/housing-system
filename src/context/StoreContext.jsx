@@ -1,28 +1,11 @@
-import { createContext, useContext, useEffect, useReducer, useCallback, useRef } from "react";
-import { initialSeedV3, migrateV2toV3 } from "../data.js";
-
-const V3_KEY = "eh_store_v3";
-const V2_KEY = "eh_store_v2";
-
-function load() {
-  try {
-    const raw = localStorage.getItem(V3_KEY);
-    if (raw) return JSON.parse(raw);
-    const v2raw = localStorage.getItem(V2_KEY);
-    if (v2raw) {
-      const migrated = migrateV2toV3(JSON.parse(v2raw));
-      try { localStorage.setItem(V3_KEY, JSON.stringify(migrated)); } catch {}
-      return migrated;
-    }
-  } catch {}
-  return initialSeedV3();
-}
-function save(state) {
-  try { localStorage.setItem(V3_KEY, JSON.stringify(state)); } catch {}
-}
+import { createContext, useContext, useEffect, useReducer, useCallback, useRef, useState } from "react";
+import { initialSeedV3 } from "../data.js";
+import { supabase } from "../supabaseClient";
 
 function reducer(state, action) {
   switch (action.type) {
+    case "SET_INITIAL_DATA": return { ...state, ...action.payload };
+
     // ---- Properties
     case "ADD_PROPERTY":    return { ...state, properties: [action.payload, ...state.properties] };
     case "UPDATE_PROPERTY": return { ...state, properties: state.properties.map(p => p.id === action.payload.id ? action.payload : p) };
@@ -154,24 +137,10 @@ function iAmount(state, id) {
 
 const StoreCtx = createContext(null);
 
-// Side-effect generators (notifications, auto-invoices, preventive tickets).
-// They run on boot and after every dispatch.
 function deriveSideEffects(state, dispatch) {
   const today = new Date();
   const todayStr = today.toISOString().slice(0,10);
 
-  // Auto-flag leases as Expiring if end within 30 days and still Active.
-  state.leases.forEach(l => {
-    if (l.status === "Active" && l.end) {
-      const days = Math.floor((new Date(l.end) - today) / 86400000);
-      if (days <= 30 && days >= 0) {
-        // dispatch only if not already Expiring (compare against current value)
-        // — caller passes the fresh state so we know
-      }
-    }
-  });
-
-  // Notifications — lease expiring within 30 / 7 days.
   state.leases.forEach(l => {
     if (!l.end) return;
     const days = Math.floor((new Date(l.end) - today) / 86400000);
@@ -190,7 +159,6 @@ function deriveSideEffects(state, dispatch) {
     }
   });
 
-  // Notifications — overdue invoices.
   state.invoices.forEach(i => {
     if (i.status === "Overdue") {
       const kind = "invoice_overdue";
@@ -207,7 +175,6 @@ function deriveSideEffects(state, dispatch) {
     }
   });
 
-  // Preventive maintenance — if a ticket has dueAt in the past and isPreventive, clone a new ticket.
   state.maintenance.forEach(m => {
     if (m.isPreventive && m.dueAt && new Date(m.dueAt) <= today) {
       const kind = "preventive_due";
@@ -226,27 +193,88 @@ function deriveSideEffects(state, dispatch) {
 }
 
 export function StoreProvider({ children }) {
-  const [state, dispatch] = useReducer(reducer, undefined, load);
-
-  useEffect(() => { save(state); }, [state]);
-
-  // Run side-effect generators once on mount and after every state change.
+  const [state, dispatch] = useReducer(reducer, initialSeedV3());
+  const [isLoading, setIsLoading] = useState(true);
   const firstRun = useRef(true);
+
+  useEffect(() => {
+    async function fetchInitialData() {
+      try {
+        const tables = [
+          "owners", "vendors", "properties", "units", "tenants",
+          "leases", "invoices", "payments", "expenses",
+          "maintenance", "messages", "announcements",
+          "documents", "notifications", "audit_log"
+        ];
+
+        const results = {};
+        await Promise.all(tables.map(async (table) => {
+          const { data, error } = await supabase.from(table).select("*");
+          if (error) console.error(`Error fetching ${table}:`, error);
+          results[table] = data || [];
+        }));
+
+        // Map table names to state keys (e.g., audit_log -> auditLog)
+        const stateMap = {
+          owners: "owners",
+          vendors: "vendors",
+          properties: "properties",
+          units: "units",
+          tenants: "tenants",
+          leases: "leases",
+          invoices: "invoices",
+          payments: "payments",
+          expenses: "expenses",
+          maintenance: "maintenance",
+          messages: "messages",
+          announcements: "announcements",
+          documents: "documents",
+          notifications: "notifications",
+          audit_log: "auditLog"
+        };
+
+        const finalData = {};
+        Object.entries(stateMap).forEach(([table, key]) => {
+          finalData[key] = results[table];
+        });
+
+        dispatch({ type: "SET_INITIAL_DATA", payload: finalData });
+      } catch (err) {
+        console.error("Critical error loading initial data:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    fetchInitialData();
+  }, []);
+
   useEffect(() => {
     deriveSideEffects(state, dispatch);
     if (firstRun.current) firstRun.current = false;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
 
-  // ID helpers
   const nextId = useCallback((prefix, list) => {
     const nums = (list || []).map(x => parseInt(String(x.id).split("-").pop(), 10)).filter(Number.isFinite);
     const n = (nums.length ? Math.max(...nums) : 0) + 1;
     return `${prefix}-${String(n).padStart(4, "0")}`;
   }, []);
 
-  // Wrapped dispatch that also logs audit rows. Skipped for noisy internal actions.
   const audit = useCallback((entry) => {
+    // We use a helper function to handle async audit logging
+    const logAudit = async (e) => {
+      const { error } = await supabase.from("audit_log").insert({
+        id: `A-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+        at: new Date().toISOString(),
+        actor: e.actor || "admin",
+        action: e.action,
+        entity_type: e.entityType,
+        entity_id: e.entityId || "",
+        detail: e.detail || ""
+      });
+      if (error) console.error("Audit log error:", error);
+    };
+    logAudit(entry);
     dispatch({ type: "ADD_AUDIT", payload: {
       id: `A-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
       at: new Date().toISOString(),
@@ -270,13 +298,288 @@ export function StoreProvider({ children }) {
     }
   }, [audit]);
 
-  const value = { state, dispatch, dispatchAudit, audit, nextId };
+  // --- ASYNC ACTIONS LAYER ---
+
+  const actions = {
+    // Properties
+    addProperty: async (payload) => {
+      const { data, error } = await supabase.from("properties").insert(payload).select().single();
+      if (error) throw error;
+      dispatch({ type: "ADD_PROPERTY", payload: data });
+    },
+    updateProperty: async (payload) => {
+      const { data, error } = await supabase.from("properties").update(payload).eq("id", payload.id).select().single();
+      if (error) throw error;
+      dispatch({ type: "UPDATE_PROPERTY", payload: data });
+    },
+    deleteProperty: async (id) => {
+      const { error } = await supabase.from("properties").delete().eq("id", id);
+      if (error) throw error;
+      dispatch({ type: "DELETE_PROPERTY", payload: id });
+    },
+
+    // Units
+    addUnit: async (payload) => {
+      const { data, error } = await supabase.from("units").insert(payload).select().single();
+      if (error) throw error;
+      dispatch({ type: "ADD_UNIT", payload: data });
+    },
+    updateUnit: async (payload) => {
+      const { data, error } = await supabase.from("units").update(payload).eq("id", payload.id).select().single();
+      if (error) throw error;
+      dispatch({ type: "UPDATE_UNIT", payload: data });
+    },
+    deleteUnit: async (id) => {
+      const { error } = await supabase.from("units").delete().eq("id", id);
+      if (error) throw error;
+      dispatch({ type: "DELETE_UNIT", payload: id });
+    },
+
+    // Tenants
+    addTenant: async (payload) => {
+      const { data, error } = await supabase.from("tenants").insert(payload).select().single();
+      if (error) throw error;
+      dispatch({ type: "ADD_TENANT", payload: data });
+    },
+    updateTenant: async (payload) => {
+      const { data, error } = await supabase.from("tenants").update(payload).eq("id", payload.id).select().single();
+      if (error) throw error;
+      dispatch({ type: "UPDATE_TENANT", payload: data });
+    },
+    deleteTenant: async (id) => {
+      const { error } = await supabase.from("tenants").delete().eq("id", id);
+      if (error) throw error;
+      dispatch({ type: "DELETE_TENANT", payload: id });
+    },
+
+    // Leases
+    addLease: async (payload) => {
+      const { data, error } = await supabase.from("leases").insert(payload).select().single();
+      if (error) throw error;
+      dispatch({ type: "ADD_LEASE", payload: data });
+    },
+    updateLease: async (payload) => {
+      const { data, error } = await supabase.from("leases").update(payload).eq("id", payload.id).select().single();
+      if (error) throw error;
+      dispatch({ type: "UPDATE_LEASE", payload: data });
+    },
+    deleteLease: async (id) => {
+      const { error } = await supabase.from("leases").delete().eq("id", id);
+      if (error) throw error;
+      dispatch({ type: "DELETE_LEASE", payload: id });
+    },
+
+    // Invoices
+    addInvoice: async (payload) => {
+      const { data, error } = await supabase.from("invoices").insert(payload).select().single();
+      if (error) throw error;
+      dispatch({ type: "ADD_INVOICE", payload: data });
+    },
+    updateInvoice: async (payload) => {
+      const { data, error } = await supabase.from("invoices").update(payload).eq("id", payload.id).select().single();
+      if (error) throw error;
+      dispatch({ type: "UPDATE_INVOICE", payload: data });
+    },
+    deleteInvoice: async (id) => {
+      const { error } = await supabase.from("invoices").delete().eq("id", id);
+      if (error) throw error;
+      dispatch({ type: "DELETE_INVOICE", payload: id });
+    },
+    markInvoicePaid: async (payload) => {
+      const { data, error } = await supabase.from("invoices").update({ status: "Paid", paid: new Date().toISOString().slice(0,10) }).eq("id", payload.id).select().single();
+      if (error) throw error;
+
+      // Also handle payment record
+      if (payload.method) {
+        await supabase.from("payments").insert({
+          id: `PAY-${Date.now()}`,
+          invoiceId: payload.id,
+          amount: iAmount(state, payload.id),
+          method: payload.method,
+          paidAt: new Date().toISOString().slice(0,10),
+          note: payload.note || "",
+          receiptNo: `RCT-${Math.floor(Math.random()*9000+1000)}`
+        });
+      }
+
+      dispatch({ type: "MARK_INVOICE_PAID", payload });
+    },
+
+    // Expenses
+    addExpense: async (payload) => {
+      const { data, error } = await supabase.from("expenses").insert(payload).select().single();
+      if (error) throw error;
+      dispatch({ type: "ADD_EXPENSE", payload: data });
+    },
+    updateExpense: async (payload) => {
+      const { data, error } = await supabase.from("expenses").update(payload).eq("id", payload.id).select().single();
+      if (error) throw error;
+      dispatch({ type: "UPDATE_EXPENSE", payload: data });
+    },
+    deleteExpense: async (id) => {
+      const { error } = await supabase.from("expenses").delete().eq("id", id);
+      if (error) throw error;
+      dispatch({ type: "DELETE_EXPENSE", payload: id });
+    },
+
+    // Maintenance
+    addMaint: async (payload) => {
+      const { data, error } = await supabase.from("maintenance").insert(payload).select().single();
+      if (error) throw error;
+      dispatch({ type: "ADD_MAINT", payload: data });
+    },
+    updateMaint: async (payload) => {
+      const { data, error } = await supabase.from("maintenance").update(payload).eq("id", payload.id).select().single();
+      if (error) throw error;
+      dispatch({ type: "UPDATE_MAINT", payload: data });
+    },
+    deleteMaint: async (id) => {
+      const { error } = await supabase.from("maintenance").delete().eq("id", id);
+      if (error) throw error;
+      dispatch({ type: "DELETE_MAINT", payload: id });
+    },
+    moveMaint: async (payload) => {
+      const { data, error } = await supabase.from("maintenance").update({ status: payload.status, updated: new Date().toISOString().slice(0,10) }).eq("id", payload.id).select().single();
+      if (error) throw error;
+      dispatch({ type: "MOVE_MAINT", payload });
+    },
+
+    // Messages
+    addMessage: async (payload) => {
+      const { data, error } = await supabase.from("messages").insert(payload).select().single();
+      if (error) throw error;
+      dispatch({ type: "ADD_MESSAGE", payload: data });
+    },
+    sendReply: async (payload) => {
+      const { error } = await supabase.from("messages").update({
+        thread: JSON.stringify([...state.messages.find(m => m.id === payload.id).thread, payload.reply]),
+        preview: payload.reply.text,
+        unread: false
+      }).eq("id", payload.id);
+      if (error) throw error;
+      dispatch({ type: "SEND_REPLY", payload });
+    },
+    markMessageRead: async (id) => {
+      const { error } = await supabase.from("messages").update({ unread: false }).eq("id", id);
+      if (error) throw error;
+      dispatch({ type: "MARK_READ", payload: id });
+    },
+    deleteMessage: async (id) => {
+      const { error } = await supabase.from("messages").delete().eq("id", id);
+      if (error) throw error;
+      dispatch({ type: "DELETE_MESSAGE", payload: id });
+    },
+
+    // Announcements
+    addAnnouncement: async (payload) => {
+      const { data, error } = await supabase.from("announcements").insert(payload).select().single();
+      if (error) throw error;
+      dispatch({ type: "ADD_ANNOUNCEMENT", payload: data });
+    },
+    deleteAnnouncement: async (id) => {
+      const { error } = await supabase.from("announcements").delete().eq("id", id);
+      if (error) throw error;
+      dispatch({ type: "DELETE_ANNOUNCEMENT", payload: id });
+    },
+
+    // Owners
+    addOwner: async (payload) => {
+      const { data, error } = await supabase.from("owners").insert(payload).select().single();
+      if (error) throw error;
+      dispatch({ type: "ADD_OWNER", payload: data });
+    },
+    updateOwner: async (payload) => {
+      const { data, error } = await supabase.from("owners").update(payload).eq("id", payload.id).select().single();
+      if (error) throw error;
+      dispatch({ type: "UPDATE_OWNER", payload: data });
+    },
+    deleteOwner: async (id) => {
+      const { error } = await supabase.from("owners").delete().eq("id", id);
+      if (error) throw error;
+      dispatch({ type: "DELETE_OWNER", payload: id });
+    },
+
+    // Vendors
+    addVendor: async (payload) => {
+      const { data, error } = await supabase.from("vendors").insert(payload).select().single();
+      if (error) throw error;
+      dispatch({ type: "ADD_VENDOR", payload: data });
+    },
+    updateVendor: async (payload) => {
+      const { data, error } = await supabase.from("vendors").update(payload).eq("id", payload.id).select().single();
+      if (error) throw error;
+      dispatch({ type: "UPDATE_VENDOR", payload: data });
+    },
+    deleteVendor: async (id) => {
+      const { error } = await supabase.from("vendors").delete().eq("id", id);
+      if (error) throw error;
+      dispatch({ type: "DELETE_VENDOR", payload: id });
+    },
+
+    // Documents
+    addDocument: async (payload) => {
+      const { data, error } = await supabase.from("documents").insert(payload).select().single();
+      if (error) throw error;
+      dispatch({ type: "ADD_DOCUMENT", payload: data });
+    },
+    deleteDocument: async (id) => {
+      const { error } = await supabase.from("documents").delete().eq("id", id);
+      if (error) throw error;
+      dispatch({ type: "DELETE_DOCUMENT", payload: id });
+    },
+
+    // Notifications
+    addNotification: async (payload) => {
+      const { data, error } = await supabase.from("notifications").insert(payload).select().single();
+      if (error) throw error;
+      dispatch({ type: "ADD_NOTIFICATION", payload: data });
+    },
+    markNotifRead: async (id) => {
+      const { error } = await supabase.from("notifications").update({ read: true }).eq("id", id);
+      if (error) throw error;
+      dispatch({ type: "MARK_NOTIF_READ", payload: id });
+    },
+    markAllNotifRead: async () => {
+      const { error } = await supabase.from("notifications").update({ read: true }).neq("read", true);
+      if (error) throw error;
+      dispatch({ type: "MARK_ALL_NOTIF_READ" });
+    },
+    clearNotifications: async () => {
+      const { error } = await supabase.from("notifications").delete().neq("read", true);
+      if (error) throw error;
+      dispatch({ type: "CLEAR_NOTIFICATIONS" });
+    },
+
+    // Audit
+    addAudit: async (entry) => {
+      const { error } = await supabase.from("audit_log").insert({
+        id: `A-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+        at: new Date().toISOString(),
+        actor: entry.actor || "admin",
+        action: entry.action,
+        entity_type: entry.entityType,
+        entity_id: entry.entityId || "",
+        detail: entry.detail || ""
+      });
+      if (error) throw error;
+      dispatch({ type: "ADD_AUDIT", payload: {
+        id: `A-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+        at: new Date().toISOString(),
+        actor: entry.actor || "admin",
+        action: entry.action,
+        entityType: entry.entityType,
+        entityId: entry.entityId || "",
+        detail: entry.detail || ""
+      }});
+    }
+  };
+
+  const value = { state, dispatch, dispatchAudit, audit, nextId, actions, isLoading };
   return <StoreCtx.Provider value={value}>{children}</StoreCtx.Provider>;
 }
 
 export const useStore = () => useContext(StoreCtx);
 
-// Selector helpers that re-derive cheap aggregates
 export function useStats() {
   const { state } = useStore();
   const totalUnits   = state.units.length;

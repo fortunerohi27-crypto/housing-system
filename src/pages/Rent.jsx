@@ -9,7 +9,7 @@ const STATUSES = ["Paid", "Pending", "Overdue"];
 const LATE_FEE_PCT = 0.05; // 5% of invoice amount
 const GRACE_DAYS  = 5;     // overdue if past due + 5 days
 
-function InvoiceForm({ initial, tenants, onSubmit, onCancel }) {
+function InvoiceForm({ initial, tenants, onSubmit, onCancel, isSaving }) {
   const [form, setForm] = useState(initial || { tenantId: "", amount: 0, due: new Date().toISOString().slice(0,10), status: "Pending" });
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -45,20 +45,21 @@ function InvoiceForm({ initial, tenants, onSubmit, onCancel }) {
       </div>
       <div className="col-span-2 flex justify-end gap-2 mt-4">
         <button type="button" onClick={onCancel} className="btn-ghost">Cancel</button>
-        <button type="submit" className="btn-primary">{initial?.id ? "Save changes" : "Create invoice"}</button>
+        <button type="submit" className="btn-primary" disabled={isSaving}>{isSaving ? "Saving..." : initial?.id ? "Save changes" : "Create invoice"}</button>
       </div>
     </form>
   );
 }
 
 export default function Rent() {
-  const { state, dispatch, nextId } = useStore();
+  const { state, dispatch, nextId, actions } = useStore();
   const { fmt, fmtNum } = useApp();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("All");
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const rows = useMemo(() => {
     return state.invoices
@@ -80,27 +81,49 @@ export default function Rent() {
   const overdueCount = rows.filter(r => r.status === "Overdue").length;
 
   // Late-fee automation: flag Pending invoices past due + grace as Overdue.
-  function runAutomation() {
+  async function runAutomation() {
     const today = new Date();
-    rows.forEach(r => {
-      if (r.status === "Pending") {
-        const due = new Date(r.due);
-        const days = Math.floor((today - due) / (1000*60*60*24));
-        if (days > GRACE_DAYS) dispatch({ type: "UPDATE_INVOICE", payload: { ...r, status: "Overdue" } });
+    const overdues = rows.filter(r => r.status === "Pending");
+    let count = 0;
+    for (const r of overdues) {
+      const due = new Date(r.due);
+      const days = Math.floor((today - due) / (1000*60*60*24));
+      if (days > GRACE_DAYS) {
+        await actions.updateInvoice({ ...r, status: "Overdue" });
+        dispatch({ type: "UPDATE_INVOICE", payload: { ...r, status: "Overdue" } });
+        count++;
       }
-    });
-    alert(`Sweep complete. ${overdueCount} invoice(s) were already overdue.`);
+    }
+    alert(`Sweep complete. ${count} invoice(s) were marked overdue.`);
   }
 
-  function applyLateFee(r) {
+  async function applyLateFee(r) {
     const fee = Math.round((r.amount || 0) * LATE_FEE_PCT);
-    dispatch({ type: "APPLY_LATE_FEE", payload: { id: r.id, fee } });
+    try {
+      await actions.updateInvoice({ ...r, amount: (r.amount || 0) + fee, lateFee: fee });
+      dispatch({ type: "APPLY_LATE_FEE", payload: { id: r.id, fee } });
+    } catch (err) {
+      alert("Error applying late fee: " + err.message);
+    }
   }
 
-  function save(payload) {
-    if (edit?.id) dispatch({ type: "UPDATE_INVOICE", payload: { ...edit, ...payload } });
-    else dispatch({ type: "ADD_INVOICE", payload: { id: nextId("INV", state.invoices), ...payload } });
-    setOpen(false); setEdit(null);
+  async function save(payload) {
+    setIsSaving(true);
+    try {
+      if (edit?.id) {
+        await actions.updateInvoice({ ...edit, ...payload });
+        dispatch({ type: "UPDATE_INVOICE", payload: { ...edit, ...payload } });
+      } else {
+        const newInvoice = { id: nextId("INV", state.invoices), ...payload };
+        await actions.addInvoice(newInvoice);
+        dispatch({ type: "ADD_INVOICE", payload: newInvoice });
+      }
+      setOpen(false); setEdit(null);
+    } catch (err) {
+      alert("Error saving invoice: " + err.message);
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -184,7 +207,14 @@ export default function Rent() {
                         ) : (
                           <div className="inline-flex gap-1">
                             {r.status === "Overdue" && <button onClick={() => applyLateFee(r)} className="btn-ghost text-rose-600 border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-900/30 transition-colors" title={`Apply ${Math.round(LATE_FEE_PCT*100)}% late fee`}><AlertTriangle size={14} /> Late fee</button>}
-                            <button onClick={() => dispatch({ type: "MARK_INVOICE_PAID", payload: { id: r.id, method: "Admin recorded" } })} className="btn-primary shadow-sm"><Receipt size={14} /> Mark Paid</button>
+                            <button onClick={async () => {
+  try {
+    await actions.markInvoicePaid({ id: r.id, method: "Admin recorded" });
+    dispatch({ type: "MARK_INVOICE_PAID", payload: { id: r.id, method: "Admin recorded" } });
+  } catch (err) {
+    alert("Error marking paid: " + err.message);
+  }
+}} className="btn-primary shadow-sm"><Receipt size={14} /> Mark Paid</button>
                             <button onClick={() => { setEdit(r); setOpen(true); }} className="h-9 w-9 grid place-items-center rounded-lg text-stone-600 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors"><Pencil size={14} /></button>
                             <button onClick={() => setConfirm(r)} className="h-9 w-9 grid place-items-center rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 transition-colors"><Trash2 size={14} /></button>
                           </div>
@@ -200,10 +230,18 @@ export default function Rent() {
       </main>
 
       <Modal open={open} onClose={() => { setOpen(false); setEdit(null); }} title={edit?.id ? "Edit invoice" : "New invoice"} size="lg">
-        <InvoiceForm initial={edit || undefined} tenants={state.tenants} onSubmit={save} onCancel={() => { setOpen(false); setEdit(null); }} />
+        <InvoiceForm initial={edit || undefined} tenants={state.tenants} onSubmit={save} onCancel={() => { setOpen(false); setEdit(null); }} isSaving={isSaving} />
       </Modal>
 
-      <ConfirmDialog open={!!confirm} onCancel={() => setConfirm(null)} onConfirm={() => { dispatch({ type: "DELETE_INVOICE", payload: confirm.id }); setConfirm(null); }} title={`Delete ${confirm?.id}?`} />
+      <ConfirmDialog open={!!confirm} onCancel={() => setConfirm(null)} onConfirm={async () => {
+        try {
+          await actions.deleteInvoice(confirm.id);
+          dispatch({ type: "DELETE_INVOICE", payload: confirm.id });
+          setConfirm(null);
+        } catch (err) {
+          alert("Error deleting invoice: " + err.message);
+        }
+      }} title={`Delete ${confirm?.id}?`} />
     </>
   );
 }

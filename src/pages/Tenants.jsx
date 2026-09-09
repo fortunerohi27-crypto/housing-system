@@ -39,7 +39,7 @@ function readFileAsDataUrl(file) {
   });
 }
 
-function TenantForm({ initial, units, tenants, onSubmit, onCancel }) {
+function TenantForm({ initial, units, tenants, onSubmit, onCancel, isSaving }) {
   const [tab, setTab] = useState("profile");
   const [form, setForm] = useState(initial || emptyForm());
   const fileRef = useRef(null);
@@ -213,20 +213,21 @@ function TenantForm({ initial, units, tenants, onSubmit, onCancel }) {
 
       <div className="flex justify-end gap-2 pt-4 border-t border-stone-200 dark:border-stone-700">
         <button type="button" onClick={onCancel} className="btn-ghost">Cancel</button>
-        <button type="submit" className="btn-primary">{initial?.id ? "Save changes" : "Create profile"}</button>
+        <button type="submit" className="btn-primary" disabled={isSaving}>{isSaving ? "Saving..." : initial?.id ? "Save changes" : "Create profile"}</button>
       </div>
     </form>
   );
 }
 
 export default function Tenants() {
-  const { state, dispatchAudit, nextId } = useStore();
+  const { state, dispatchAudit, nextId, actions } = useStore();
   const { fmt } = useApp();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("All");
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const unitsWithProps = useMemo(() =>
     state.units.map(u => ({ ...u, property: state.properties.find(p => p.id === u.propertyId) })),
@@ -240,35 +241,61 @@ export default function Tenants() {
       .sort((a,b) => a.name.localeCompare(b.name));
   }, [state.tenants, state.units, state.properties, q, status]);
 
-  function save(payload) {
-    if (edit?.id) {
-      if (edit.unitId && edit.unitId !== payload.unitId) {
-        const oldUnit = state.units.find(u => u.id === edit.unitId);
-        if (oldUnit) dispatchAudit({ type: "UPDATE_UNIT", payload: { ...oldUnit, vacant: true, status: "Vacant" } }, { entityType: "unit", detail: oldUnit.label, log: false });
+  async function save(payload) {
+    setIsSaving(true);
+    try {
+      if (edit?.id) {
+        if (edit.unitId && edit.unitId !== payload.unitId) {
+          const oldUnit = state.units.find(u => u.id === edit.unitId);
+          if (oldUnit) {
+            await actions.updateUnit({ ...oldUnit, vacant: true, status: "Vacant" });
+            dispatchAudit({ type: "UPDATE_UNIT", payload: { ...oldUnit, vacant: true, status: "Vacant" } }, { entityType: "unit", detail: oldUnit.label, log: false });
+          }
+        }
+        if (payload.unitId) {
+          const newUnit = state.units.find(u => u.id === payload.unitId);
+          if (newUnit) {
+            await actions.updateUnit({ ...newUnit, vacant: false, status: "Occupied" });
+            dispatchAudit({ type: "UPDATE_UNIT", payload: { ...newUnit, vacant: false, status: "Occupied" } }, { entityType: "unit", detail: newUnit.label, log: false });
+          }
+        }
+        await actions.updateTenant({ ...edit, ...payload });
+        dispatchAudit({ type: "UPDATE_TENANT", payload: { ...edit, ...payload } }, { entityType: "tenant", detail: edit.name });
+      } else {
+        const newTenant = { id: nextId("T", state.tenants), ...payload };
+        await actions.addTenant(newTenant);
+        dispatchAudit({ type: "ADD_TENANT", payload: newTenant }, { entityType: "tenant", detail: payload.name });
+        if (payload.unitId) {
+          const u = state.units.find(x => x.id === payload.unitId);
+          if (u) {
+            await actions.updateUnit({ ...u, vacant: false, status: "Occupied" });
+            dispatchAudit({ type: "UPDATE_UNIT", payload: { ...u, vacant: false, status: "Occupied" } }, { entityType: "unit", detail: u.label, log: false });
+          }
+        }
       }
-      if (payload.unitId) {
-        const newUnit = state.units.find(u => u.id === payload.unitId);
-        if (newUnit) dispatchAudit({ type: "UPDATE_UNIT", payload: { ...newUnit, vacant: false, status: "Occupied" } }, { entityType: "unit", detail: newUnit.label, log: false });
-      }
-      dispatchAudit({ type: "UPDATE_TENANT", payload: { ...edit, ...payload } }, { entityType: "tenant", detail: edit.name });
-    } else {
-      const newTenant = { id: nextId("T", state.tenants), ...payload };
-      dispatchAudit({ type: "ADD_TENANT", payload: newTenant }, { entityType: "tenant", detail: payload.name });
-      if (payload.unitId) {
-        const u = state.units.find(x => x.id === payload.unitId);
-        if (u) dispatchAudit({ type: "UPDATE_UNIT", payload: { ...u, vacant: false, status: "Occupied" } }, { entityType: "unit", detail: u.label, log: false });
-      }
+      setOpen(false); setEdit(null);
+    } catch (err) {
+      alert("Error saving tenant: " + err.message);
+    } finally {
+      setIsSaving(false);
     }
-    setOpen(false); setEdit(null);
   }
 
-  function del(t) {
-    dispatchAudit({ type: "DELETE_TENANT", payload: t.id }, { entityType: "tenant", detail: t.name });
-    if (t.unitId) {
-      const u = state.units.find(x => x.id === t.unitId);
-      if (u) dispatchAudit({ type: "UPDATE_UNIT", payload: { ...u, vacant: true, status: "Vacant" } }, { entityType: "unit", detail: u.label, log: false });
+  async function del(t) {
+    try {
+      await actions.deleteTenant(t.id);
+      dispatchAudit({ type: "DELETE_TENANT", payload: t.id }, { entityType: "tenant", detail: t.name });
+      if (t.unitId) {
+        const u = state.units.find(x => x.id === t.unitId);
+        if (u) {
+          await actions.updateUnit({ ...u, vacant: true, status: "Vacant" });
+          dispatchAudit({ type: "UPDATE_UNIT", payload: { ...u, vacant: true, status: "Vacant" } }, { entityType: "unit", detail: u.label, log: false });
+        }
+      }
+      setConfirm(null);
+    } catch (err) {
+      alert("Error deleting tenant: " + err.message);
     }
-    setConfirm(null);
   }
 
   return (
@@ -347,13 +374,19 @@ export default function Tenants() {
       </main>
 
       <Modal open={open} onClose={() => { setOpen(false); setEdit(null); }} title={edit?.id ? "Edit tenant" : "Onboard new tenant"} size="lg">
-        <TenantForm initial={edit || undefined} units={unitsWithProps} tenants={state.tenants} onSubmit={save} onCancel={() => { setOpen(false); setEdit(null); }} />
+        <TenantForm initial={edit || undefined} units={unitsWithProps} tenants={state.tenants} onSubmit={save} onCancel={() => { setOpen(false); setEdit(null); }} isSaving={isSaving} />
       </Modal>
 
       <ConfirmDialog
         open={!!confirm}
         onCancel={() => setConfirm(null)}
-        onConfirm={() => del(confirm)}
+        onConfirm={async () => {
+          try {
+            await del(confirm);
+          } catch (err) {
+            alert("Error deleting tenant: " + err.message);
+          }
+        }}
         title={`Delete "${confirm?.name}"?`}
         message="The tenant's leases, invoices and maintenance history will remain but may show missing references."
       />

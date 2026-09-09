@@ -79,7 +79,7 @@ CREATE TABLE leases (
   tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE,
   unit_id TEXT REFERENCES units(id) ON DELETE CASCADE,
   start DATE NOT NULL,
-  end DATE NOT NULL,
+  "end" DATE NOT NULL,
   rent NUMERIC DEFAULT 0,
   deposit NUMERIC DEFAULT 0,
   status TEXT DEFAULT 'Active',
@@ -187,7 +187,7 @@ CREATE TABLE notifications (
 -- 15. Audit Log
 CREATE TABLE audit_log (
   id TEXT PRIMARY KEY,
-  at TIMESTAMPTZ DEFAULT NOW(),
+  "at" TIMESTAMPTZ DEFAULT NOW(),
   actor TEXT DEFAULT 'admin',
   action TEXT NOT NULL,
   entity_type TEXT,

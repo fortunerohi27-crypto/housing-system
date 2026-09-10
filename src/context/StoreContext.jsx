@@ -235,7 +235,7 @@ export function StoreProvider({ children }) {
 
         const finalData = {};
         Object.entries(stateMap).forEach(([table, key]) => {
-          finalData[key] = results[table];
+          finalData[key] = results[table] || [];
         });
 
         dispatch({ type: "SET_INITIAL_DATA", payload: finalData });
@@ -305,11 +305,13 @@ export function StoreProvider({ children }) {
     addProperty: async (payload) => {
       const { data, error } = await supabase.from("properties").insert(payload).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Property was not created successfully");
       dispatch({ type: "ADD_PROPERTY", payload: data });
     },
     updateProperty: async (payload) => {
       const { data, error } = await supabase.from("properties").update(payload).eq("id", payload.id).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Property update failed");
       dispatch({ type: "UPDATE_PROPERTY", payload: data });
     },
     deleteProperty: async (id) => {
@@ -322,11 +324,13 @@ export function StoreProvider({ children }) {
     addUnit: async (payload) => {
       const { data, error } = await supabase.from("units").insert(payload).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Unit was not created successfully");
       dispatch({ type: "ADD_UNIT", payload: data });
     },
     updateUnit: async (payload) => {
       const { data, error } = await supabase.from("units").update(payload).eq("id", payload.id).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Unit update failed");
       dispatch({ type: "UPDATE_UNIT", payload: data });
     },
     deleteUnit: async (id) => {
@@ -339,11 +343,13 @@ export function StoreProvider({ children }) {
     addTenant: async (payload) => {
       const { data, error } = await supabase.from("tenants").insert(payload).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Tenant was not created successfully");
       dispatch({ type: "ADD_TENANT", payload: data });
     },
     updateTenant: async (payload) => {
       const { data, error } = await supabase.from("tenants").update(payload).eq("id", payload.id).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Tenant update failed");
       dispatch({ type: "UPDATE_TENANT", payload: data });
     },
     deleteTenant: async (id) => {
@@ -356,11 +362,13 @@ export function StoreProvider({ children }) {
     addLease: async (payload) => {
       const { data, error } = await supabase.from("leases").insert(payload).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Lease was not created successfully");
       dispatch({ type: "ADD_LEASE", payload: data });
     },
     updateLease: async (payload) => {
       const { data, error } = await supabase.from("leases").update(payload).eq("id", payload.id).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Lease update failed");
       dispatch({ type: "UPDATE_LEASE", payload: data });
     },
     deleteLease: async (id) => {
@@ -373,11 +381,13 @@ export function StoreProvider({ children }) {
     addInvoice: async (payload) => {
       const { data, error } = await supabase.from("invoices").insert(payload).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Invoice was not created successfully");
       dispatch({ type: "ADD_INVOICE", payload: data });
     },
     updateInvoice: async (payload) => {
       const { data, error } = await supabase.from("invoices").update(payload).eq("id", payload.id).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Invoice update failed");
       dispatch({ type: "UPDATE_INVOICE", payload: data });
     },
     deleteInvoice: async (id) => {
@@ -388,6 +398,7 @@ export function StoreProvider({ children }) {
     markInvoicePaid: async (payload) => {
       const { data, error } = await supabase.from("invoices").update({ status: "Paid", paid: new Date().toISOString().slice(0,10) }).eq("id", payload.id).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Failed to mark invoice as paid");
 
       // Also handle payment record
       if (payload.method) {
@@ -409,11 +420,13 @@ export function StoreProvider({ children }) {
     addExpense: async (payload) => {
       const { data, error } = await supabase.from("expenses").insert(payload).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Expense was not created successfully");
       dispatch({ type: "ADD_EXPENSE", payload: data });
     },
     updateExpense: async (payload) => {
       const { data, error } = await supabase.from("expenses").update(payload).eq("id", payload.id).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Expense update failed");
       dispatch({ type: "UPDATE_EXPENSE", payload: data });
     },
     deleteExpense: async (id) => {
@@ -426,11 +439,13 @@ export function StoreProvider({ children }) {
     addMaint: async (payload) => {
       const { data, error } = await supabase.from("maintenance").insert(payload).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Maintenance ticket was not created successfully");
       dispatch({ type: "ADD_MAINT", payload: data });
     },
     updateMaint: async (payload) => {
       const { data, error } = await supabase.from("maintenance").update(payload).eq("id", payload.id).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Maintenance update failed");
       dispatch({ type: "UPDATE_MAINT", payload: data });
     },
     deleteMaint: async (id) => {
@@ -441,6 +456,7 @@ export function StoreProvider({ children }) {
     moveMaint: async (payload) => {
       const { data, error } = await supabase.from("maintenance").update({ status: payload.status, updated: new Date().toISOString().slice(0,10) }).eq("id", payload.id).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Failed to move maintenance ticket");
       dispatch({ type: "MOVE_MAINT", payload });
     },
 
@@ -448,6 +464,7 @@ export function StoreProvider({ children }) {
     addMessage: async (payload) => {
       const { data, error } = await supabase.from("messages").insert(payload).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Message was not sent successfully");
       dispatch({ type: "ADD_MESSAGE", payload: data });
     },
     sendReply: async (payload) => {
@@ -474,6 +491,7 @@ export function StoreProvider({ children }) {
     addAnnouncement: async (payload) => {
       const { data, error } = await supabase.from("announcements").insert(payload).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Announcement was not created successfully");
       dispatch({ type: "ADD_ANNOUNCEMENT", payload: data });
     },
     deleteAnnouncement: async (id) => {
@@ -486,11 +504,13 @@ export function StoreProvider({ children }) {
     addOwner: async (payload) => {
       const { data, error } = await supabase.from("owners").insert(payload).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Owner was not created successfully");
       dispatch({ type: "ADD_OWNER", payload: data });
     },
     updateOwner: async (payload) => {
       const { data, error } = await supabase.from("owners").update(payload).eq("id", payload.id).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Owner update failed");
       dispatch({ type: "UPDATE_OWNER", payload: data });
     },
     deleteOwner: async (id) => {
@@ -503,11 +523,13 @@ export function StoreProvider({ children }) {
     addVendor: async (payload) => {
       const { data, error } = await supabase.from("vendors").insert(payload).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Vendor was not created successfully");
       dispatch({ type: "ADD_VENDOR", payload: data });
     },
     updateVendor: async (payload) => {
       const { data, error } = await supabase.from("vendors").update(payload).eq("id", payload.id).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Vendor update failed");
       dispatch({ type: "UPDATE_VENDOR", payload: data });
     },
     deleteVendor: async (id) => {
@@ -520,6 +542,7 @@ export function StoreProvider({ children }) {
     addDocument: async (payload) => {
       const { data, error } = await supabase.from("documents").insert(payload).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Document was not created successfully");
       dispatch({ type: "ADD_DOCUMENT", payload: data });
     },
     deleteDocument: async (id) => {
@@ -532,6 +555,7 @@ export function StoreProvider({ children }) {
     addNotification: async (payload) => {
       const { data, error } = await supabase.from("notifications").insert(payload).select().single();
       if (error) throw error;
+      if (!data) throw new Error("Notification was not created successfully");
       dispatch({ type: "ADD_NOTIFICATION", payload: data });
     },
     markNotifRead: async (id) => {

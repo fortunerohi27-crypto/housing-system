@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Building2, Users, FileText, Receipt, Wallet,
-  Wrench, MessageSquare, X, LogOut, RefreshCw, User, Briefcase
+  Wrench, MessageSquare, X, LogOut, RefreshCw, User, Briefcase, Trash2
 } from "lucide-react";
 import { useApp } from "../context/AppContext.jsx";
 import { useStore } from "../context/StoreContext.jsx";
@@ -70,6 +70,13 @@ export default function Sidebar() {
     navigate("/login", { replace: true });
   }
 
+  function removeAccount() {
+    if (confirm("Are you absolutely sure you want to delete your account? This action is permanent and cannot be undone.")) {
+      deleteAccount();
+      navigate("/login", { replace: true });
+    }
+  }
+
   return (
     <>
       {/* Desktop */}
@@ -99,6 +106,9 @@ export default function Sidebar() {
           )}
           <button onClick={reset} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-stone-400 hover:bg-stone-800 hover:text-stone-200 transition">
             <RefreshCw size={18} /> Clear portfolio data
+          </button>
+          <button onClick={removeAccount} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-rose-500/70 hover:bg-rose-500/10 hover:text-rose-400 transition">
+            <Trash2 size={18} /> Delete account
           </button>
           <button onClick={signOut} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-rose-400 hover:bg-rose-500/10 transition">
             <LogOut size={18} /> Sign out
@@ -135,6 +145,9 @@ export default function Sidebar() {
                   </div>
                 </div>
               )}
+              <button onClick={removeAccount} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-rose-500/70 hover:bg-rose-500/10 hover:text-rose-400 transition">
+                <Trash2 size={18} /> Delete account
+              </button>
               <button onClick={signOut} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-rose-400 hover:bg-rose-500/10">
                 <LogOut size={18} /> Sign out
               </button>

@@ -165,9 +165,8 @@ export default function Login() {
             Are you a tenant? <Link to="/tenant/register" className="font-semibold text-sky-700 hover:text-sky-800">Activate resident access</Link>
           </p>
 
-          <div className="mt-8 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900/50 p-4 text-xs text-stone-500 dark:text-stone-400">
-            <strong className="text-stone-700 dark:text-stone-300">Demo tip:</strong> Register a new admin account first.
-            Your data is stored locally in this browser — no server required.
+          <div className="mt-8 rounded-xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50 dark:bg-emerald-900/20 p-4 text-xs text-emerald-700 dark:text-emerald-300">
+            <strong className="text-emerald-800 dark:text-emerald-200">Live Database Connected:</strong> Accounts registered here are saved directly to your Supabase cloud instance.
           </div>
         </div>
       </div>

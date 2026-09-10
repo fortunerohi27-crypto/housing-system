@@ -130,7 +130,15 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
-  const value = { user, ready, register, registerTenant, login, logout, isAuthenticated: !!user };
+  const deleteAccount = useCallback(() => {
+    const users = loadUsers();
+    const updatedUsers = users.filter((u) => u.id !== user?.id);
+    saveUsers(updatedUsers);
+    localStorage.removeItem(SESSION_KEY);
+    setUser(null);
+  }, [user]);
+
+  const value = { user, ready, register, registerTenant, login, logout, deleteAccount, isAuthenticated: !!user };
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
 }
 

@@ -56,7 +56,7 @@ function AmenityPicker({ value = [], onChange }) {
   );
 }
 
-function PropertyForm({ initial, owners, onSubmit, onCancel }) {
+function PropertyForm({ initial, owners, onSubmit, onCancel, isSaving }) {
   const [form, setForm] = useState(initial || { name: "", address: "", type: "Apartment", monthlyRevenue: 0, ownerId: "", ownershipPct: 100, amenities: [], photoDataUrls: [], archived: false });
   const fileRef = useRef(null);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -124,7 +124,7 @@ function PropertyForm({ initial, owners, onSubmit, onCancel }) {
   );
 }
 
-function UnitForm({ initial, onSubmit, onCancel }) {
+function UnitForm({ initial, onSubmit, onCancel, isSavingUnit }) {
   const [form, setForm] = useState(initial || { label: "", bedrooms: 1, sqft: 0, rent: 0, status: "Vacant", photoDataUrls: [], floorPlanDataUrl: "" });
   const fileRef = useRef(null);
   const planRef = useRef(null);
@@ -200,7 +200,7 @@ function unitStatusClass(s) {
 }
 
 export default function Properties() {
-  const { state, dispatchAudit, nextId, actions } = useStore();
+  const { state, audit, nextId, actions } = useStore();
   const { fmt } = useApp();
   const [q, setQ] = useState("");
   const [type, setType] = useState("All");
@@ -230,12 +230,11 @@ export default function Properties() {
     setIsSaving(true);
     try {
       if (edit?.id) {
-        await actions.updateProperty({ ...edit, ...payload });
-        dispatchAudit({ type: "UPDATE_PROPERTY", payload: { ...edit, ...payload } }, { entityType: "property", detail: edit.name });
+        const updated = await actions.updateProperty({ ...edit, ...payload });
+        audit({ action: "UPDATE_PROPERTY", entityType: "property", entityId: updated.id, detail: updated.name });
       } else {
-        const newProp = { id: nextId("P", state.properties), ...payload };
-        await actions.addProperty(newProp);
-        dispatchAudit({ type: "ADD_PROPERTY", payload: newProp }, { entityType: "property", detail: payload.name });
+        const created = await actions.addProperty(payload);
+        audit({ action: "ADD_PROPERTY", entityType: "property", entityId: created.id, detail: created.name });
       }
       setOpen(false); setEdit(null);
     } catch (err) {
@@ -249,16 +248,15 @@ export default function Properties() {
     setIsSavingUnit(true);
     try {
       if (unitEdit?.id) {
-        await actions.updateUnit({ ...unitEdit, ...payload });
-        dispatchAudit({ type: "UPDATE_UNIT", payload: { ...unitEdit, ...payload } }, { entityType: "unit", detail: unitEdit.label });
+        const updated = await actions.updateUnit({ ...unitEdit, ...payload });
+        audit({ action: "UPDATE_UNIT", entityType: "unit", entityId: updated.id, detail: updated.label });
       } else {
-        const newUnit = {
-          id: nextId("U", state.units),
+        const newUnitPayload = {
           propertyId: manageProp.id,
           ...payload
         };
-        await actions.addUnit(newUnit);
-        dispatchAudit({ type: "ADD_UNIT", payload: newUnit }, { entityType: "unit", detail: payload.label });
+        const created = await actions.addUnit(newUnitPayload);
+        audit({ action: "ADD_UNIT", entityType: "unit", entityId: created.id, detail: created.label });
       }
       setUnitOpen(false);
       setUnitEdit(null);
@@ -394,7 +392,7 @@ export default function Properties() {
 
       {/* Property add/edit */}
       <Modal open={open} onClose={() => { setOpen(false); setEdit(null); }} title={edit?.id ? "Edit property" : "Add property"} size="lg">
-        <PropertyForm initial={edit || undefined} owners={state.owners} onSubmit={save} onCancel={() => { setOpen(false); setEdit(null); }} />
+        <PropertyForm initial={edit || undefined} owners={state.owners} onSubmit={save} onCancel={() => { setOpen(false); setEdit(null); }} isSaving={isSaving} />
       </Modal>
 
       <ConfirmDialog
@@ -483,6 +481,7 @@ export default function Properties() {
           initial={unitEdit || undefined}
           onSubmit={saveUnit}
           onCancel={() => { setUnitOpen(false); setUnitEdit(null); }}
+          isSavingUnit={isSavingUnit}
         />
       </Modal>
 

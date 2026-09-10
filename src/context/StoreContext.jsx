@@ -307,6 +307,7 @@ export function StoreProvider({ children }) {
       if (error) throw error;
       if (!data) throw new Error("Property was not created successfully");
       dispatch({ type: "ADD_PROPERTY", payload: data });
+      return data;
     },
     updateProperty: async (payload) => {
       const { data, error } = await supabase.from("properties").update(payload).eq("id", payload.id).select().single();
